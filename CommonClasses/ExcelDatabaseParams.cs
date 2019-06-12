@@ -9,7 +9,7 @@ namespace CommonClasses
 {
     public enum ExcelFormats
     {
-        Auto =0,
+        Auto = 0,
         Xls,
         Xlsx
     }

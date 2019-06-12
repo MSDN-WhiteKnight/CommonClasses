@@ -15,8 +15,7 @@ namespace CommonClasses
     /// Provides MSSQL-specific methods for SQL execution and data access.
     /// </summary>
     public class SqlDB : DB
-    {
-        
+    {        
 
         /// <summary>
         /// Gets or sets database access parameters object
@@ -81,7 +80,7 @@ namespace CommonClasses
         /// </summary>
         /// <param name="proc">Procedure name</param>
         /// <param name="args">Variable-length array of procedure parameters</param>
-        public ICollection<T> QueryCollectionSP<T>(string proc, params DbParameter[] args)
+        public IEnumerable<T> QueryCollectionSP<T>(string proc, params DbParameter[] args)
         {
             DbConnection con = this.Params.BuildConnection();
 
@@ -100,7 +99,8 @@ namespace CommonClasses
                 DbDataReader rd = cmd.ExecuteReader();
                 using (rd)
                 {
-                    return ExtractCollection<T>(rd);
+                    var res = ExtractCollection<T>(rd);
+                    foreach (var item in res) yield return item;
                 }
             }
 
@@ -111,7 +111,7 @@ namespace CommonClasses
         /// </summary>
         /// <param name="proc">Procedure name</param>
         /// <param name="args">Variable-length array of procedure parameters</param>
-        public ICollection<string> QueryStringsSP(string proc, params DbParameter[] args)
+        public IEnumerable<string> QueryStringsSP(string proc, params DbParameter[] args)
         {
             DbConnection con = this.Params.BuildConnection();
 
@@ -128,8 +128,7 @@ namespace CommonClasses
                 }
 
 
-                DbDataReader rd = cmd.ExecuteReader();
-                List<string> list = new List<string>(100);
+                DbDataReader rd = cmd.ExecuteReader();                
 
                 using (rd)
                 {
@@ -137,13 +136,10 @@ namespace CommonClasses
                     {
                         if (rd.Read() == false) break;
                         string val = rd[0].ToString();
-                        list.Add(val);
+                        yield return val;
                     }
-                }
-
-                return list;
+                }                
             }
-
         }
 
 

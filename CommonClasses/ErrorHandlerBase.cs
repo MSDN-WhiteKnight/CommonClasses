@@ -27,7 +27,7 @@ namespace CommonClasses
             {
                 string path = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.Personal),
-                    "ErrorLogs");
+                    "Logs");
                 if (Directory.Exists(path) == false) Directory.CreateDirectory(path);
                 this._logfile = Path.Combine(path, pr.ProcessName + ".log");
             }

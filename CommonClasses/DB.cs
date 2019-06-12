@@ -41,18 +41,167 @@ namespace CommonClasses
                 throw new InvalidOperationException("File type '"+ext+"' is not supported");
         }
 
+        static bool CheckSqlInput(string s)
+        {
+            return ! (s.Contains("'") || s.Contains("\"") || s.Contains("]") || s.Contains(",") || s.Contains(";"));
+        }
+
+        static string PrepareSqlInput(string s)
+        {
+            return s.Replace("'", "").Replace("\"", "").Replace("]", "").Replace(",", "").Replace(";", "").Replace(" ", "");
+        }
+
         public static DataTable GetTable(string filepath, string table)
+        {
+            if (CheckSqlInput(table) == false) throw new ArgumentException("Table name contains SQL special characters");
+
+            string ext = System.IO.Path.GetExtension(filepath);
+            DB db = DB.FromFile(filepath);
+            string sql;
+
+            if ((ext == ".xls" || ext == ".xlsx") && !table.EndsWith("$")) table = table + "$";  
+            sql = "SELECT * FROM [" + table + "]";
+
+            var res = db.QueryTable(sql);
+            return res;
+        }
+
+        public static int WriteTable(string filepath, string table, DataTable dt)
+        {
+            if (CheckSqlInput(table) == false) throw new ArgumentException("Table name contains SQL special characters");
+
+            string ext = System.IO.Path.GetExtension(filepath);
+            DB db = DB.FromFile(filepath);
+            int res = 0;
+
+            string sql;
+            StringBuilder sb;
+            DataColumn col;
+
+            sb = new StringBuilder();
+            sb.Append("INSERT INTO [" + table + "](");
+
+            col = dt.Columns[0];
+            sb.Append("["+PrepareSqlInput(col.ColumnName)+"]");
+            for (int i = 1; i < dt.Columns.Count; i++)
+            {
+                col = dt.Columns[i];
+                sb.Append(", [" + PrepareSqlInput(col.ColumnName) + "]");
+            }
+            sb.Append(") VALUES (");
+
+            col = dt.Columns[0];
+            sb.Append("@" + PrepareSqlInput(col.ColumnName));
+
+            for (int i = 1; i < dt.Columns.Count; i++)
+            {
+                col = dt.Columns[i];
+                sb.Append(",@" + PrepareSqlInput(col.ColumnName));
+            }
+            sb.Append(")");
+            sql = sb.ToString();
+
+            DbParameter[] pars = new DbParameter[dt.Columns.Count];
+
+            if (!db.QueryTableNames().Contains(table))
+            {
+                sb = new StringBuilder();
+                sb.Append("CREATE TABLE [" + table + "] (");
+
+                col = dt.Columns[0];
+                sb.Append("[" + PrepareSqlInput(col.ColumnName) + "] TEXT");
+                for (int i = 1; i < dt.Columns.Count; i++)
+                {
+                    col = dt.Columns[i];
+                    sb.Append(", [" + PrepareSqlInput(col.ColumnName) + "] TEXT");
+                }
+                sb.Append(")");
+                
+                res += db.ExecuteSQL(sb.ToString(), new DbParameter[0]);
+
+                for (int i = 0; i < dt.Rows.Count; i++)
+                {
+                    DataRow row = dt.Rows[i];
+                    for (int j = 0; j < dt.Columns.Count; j++)
+                    {
+                        pars[j] = db.CreateParameter(PrepareSqlInput(dt.Columns[j].ColumnName), row[j].ToString());
+                    }
+                    res += db.ExecuteSQL(sql, pars);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < dt.Rows.Count; i++)
+                {
+                    DataRow row = dt.Rows[i];
+                    for (int j = 0; j < dt.Columns.Count; j++)
+                    {
+                        pars[j] = db.CreateParameter(PrepareSqlInput(dt.Columns[j].ColumnName), row[j]);
+                    }
+                    res += db.ExecuteSQL(sql, pars);
+                }
+            }
+            return res;
+        }
+
+        public static DataTable GetTable(string filepath, uint index)
+        {            
+            string ext = System.IO.Path.GetExtension(filepath);
+            DB db = DB.FromFile(filepath);
+
+            string table=null;
+
+            uint i = 0;
+            foreach (string s in db.QueryTableNames())
+            {
+                if (i == index) { table = s; break; }
+                i++;
+            }
+
+            if (table == null) throw new ArgumentOutOfRangeException("index","Table with index "+index.ToString()+" does not exist");
+
+            string sql;            
+            sql = "SELECT * FROM [" + table + "]";
+
+            var res = db.QueryTable(sql);
+            return res;
+        }
+
+        public static IEnumerable<T> GetCollection<T>(string filepath, string table)
+        {
+            if (CheckSqlInput(table) == false) throw new ArgumentException("Table name contains SQL special characters");
+
+            string ext = System.IO.Path.GetExtension(filepath);
+            DB db = DB.FromFile(filepath);
+            string sql;
+
+            if ((ext == ".xls" || ext == ".xlsx") && !table.EndsWith("$")) table = table + "$"; 
+            sql = "SELECT * FROM [" + table + "]";
+
+            return db.QueryCollection<T>(sql, new DbParameter[0]);            
+        }
+
+        public static IEnumerable<T> GetCollection<T>(string filepath, uint index)
         {
             string ext = System.IO.Path.GetExtension(filepath);
             DB db = DB.FromFile(filepath);
 
+            string table = null;
+
+            uint i = 0;
+            foreach (string s in db.QueryTableNames())
+            {
+                if (i == index) { table = s; break; }
+                i++;
+            }
+
+            if (table == null) 
+                throw new ArgumentOutOfRangeException("index","Table with index " + index.ToString() + " does not exist");
+
             string sql;
+            sql = "SELECT * FROM [" + table + "]";
 
-            if (ext == ".xls" || ext == ".xlsx") sql = "SELECT * FROM [" + table + "$]";
-            else sql = "SELECT * FROM [" + table + "]";
-
-            var res = db.QueryTable(sql);
-            return res;
+            return db.QueryCollection<T>(sql, new DbParameter[0]); 
         }
 
         /// <summary>
@@ -107,12 +256,11 @@ namespace CommonClasses
         }
 
         /// <summary>
-        /// Convert database query results into a colelction of object. 
+        /// Convert database query results into a collection of objects. 
         /// This method will set public properties into corresponding query result column values. 
         /// </summary>
-        public ICollection<T> ExtractCollection<T>(DbDataReader rd)
-        {
-            List<T> list = new List<T>(100);
+        public IEnumerable<T> ExtractCollection<T>(DbDataReader rd)
+        {            
             var props = typeof(T).GetProperties();
 
             while (true)
@@ -122,11 +270,19 @@ namespace CommonClasses
 
                 foreach (var prop in props)
                 {
+                    string fname = prop.Name;
+
+                    object[] attrs = prop.GetCustomAttributes(typeof(DbFieldAttribute),true);
+                    if (attrs.Length > 0)
+                    {
+                        fname = (attrs[0] as DbFieldAttribute).FieldName;
+                    }
+
                     object val;
 
                     try
                     {
-                        val = rd[prop.Name];
+                        val = rd[fname];
                     }
                     catch (System.IndexOutOfRangeException)
                     {
@@ -155,10 +311,8 @@ namespace CommonClasses
                     }
                 }
 
-                list.Add(item);
-            }
-
-            return list;
+                yield return item;                
+            }            
         }
 
         /// <summary>
@@ -167,7 +321,7 @@ namespace CommonClasses
         /// </summary>
         /// <param name="sql">Query text</param>
         /// <param name="args">Variable-length array of query parameters</param>   
-        public ICollection<T> QueryCollection<T>(string sql, params DbParameter[] args)
+        public IEnumerable<T> QueryCollection<T>(string sql, params DbParameter[] args)
         {        
             DbConnection con = this.Params.BuildConnection();
 
@@ -185,10 +339,10 @@ namespace CommonClasses
                 DbDataReader rd = cmd.ExecuteReader();
                 using (rd)
                 {
-                    return ExtractCollection<T>(rd);
+                    var res = ExtractCollection<T>(rd);
+                    foreach (var item in res) yield return item;
                 }
-            }
-            
+            }            
         }
 
         /// <summary>
@@ -196,7 +350,7 @@ namespace CommonClasses
         /// </summary>
         /// <param name="sql">Query text</param>
         /// <param name="args">Variable-length array of query parameters</param>   
-        public ICollection<string> QueryStrings(string sql, params DbParameter[] args)
+        public IEnumerable<string> QueryStrings(string sql, params DbParameter[] args)
         {
             DbConnection con = this.Params.BuildConnection();
 
@@ -211,9 +365,7 @@ namespace CommonClasses
                     cmd.Parameters.Add(args[i]);
                 }
 
-
-                DbDataReader rd = cmd.ExecuteReader();
-                List<string> list = new List<string>(100);
+                DbDataReader rd = cmd.ExecuteReader();                
 
                 using (rd)
                 {
@@ -221,11 +373,9 @@ namespace CommonClasses
                     {
                         if(rd.Read() == false) break;
                         string val = rd[0].ToString();
-                        list.Add(val);
+                        yield return val;
                     }
-                }
-
-                return list;
+                }                
             }
 
         }
@@ -284,7 +434,32 @@ namespace CommonClasses
 
         }
 
+        public IEnumerable<string> QueryTableNames()
+        {
+            DbConnection con = this.Params.BuildConnection();
+            
+            using (con)
+            {
+                con.Open();
+                DataTable dtSchema = con.GetSchema("Tables");
+                foreach (DataRow row in dtSchema.Rows)
+                {
+                    yield return row.Field<string>("TABLE_NAME");
+                }                
+            }            
+        }
+
     }
 
+    public class DbFieldAttribute : System.Attribute
+    {
+        string fname;
 
+        public DbFieldAttribute(string FieldName)
+        {
+            this.fname = FieldName;
+        }
+
+        public string FieldName { get { return fname; } }
+    }
 }
